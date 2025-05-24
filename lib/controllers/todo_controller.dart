@@ -1,23 +1,21 @@
 import 'package:darto/darto.dart';
+import 'package:dartonic/dartonic.dart';
 import 'package:zard/zard.dart';
 
-class TodoController {
-  int _idCounter = 0;
-  final List _todos = [];
+import '../database/db.dart';
 
-  void getAllTodos(Request req, Response res) {
-    return res.status(200).json(_todos);
+class TodoController {
+  void getAllTodos(Request req, Response res) async {
+    final todos = await db.select().from('todos');
+    return res.status(200).json(todos);
   }
 
   Future<void> create(Request req, Response res) async {
-    final bodySchema = z.map({
-      'title': z.string().min(3).max(100),
-      'completed': z.bool().optional(),
-    });
+    final bodySchema = z.map({'title': z.string().min(3).max(100), 'completed': z.bool().optional()});
 
     try {
       final todo = bodySchema.parse(await req.body);
-      _todos.add({'id': _idCounter++, ...todo!});
+      await db.insert('todos').values(todo!);
       return res.status(201).end();
     } on ZardError catch (e) {
       return res.status(400).json({'error': e.format()});
@@ -26,36 +24,34 @@ class TodoController {
 
   Future<void> update(Request req, Response res) async {
     final paramsSchema = z.coerce.int();
-    final bodySchema = z.map({
-      'title': z.string().min(3).max(100).optional(),
-      'completed': z.bool().optional(),
-    });
+    final bodySchema = z.map({'title': z.string().min(3).max(100).optional(), 'completed': z.bool().optional()});
 
     try {
       final id = paramsSchema.parse(req.params['id']);
       final body = bodySchema.parse(await req.body);
 
-      final index = _todos.indexWhere((todo) => todo['id'] == id);
-      if (index == -1) return res.status(404).json({'error': 'Todo not found'});
+      final todoExists = await db.select().from('todos').where(eq('todos.id', id));
 
-      _todos[index] = {'id': id, ...body!};
-      return res.status(200).json(_todos[index]);
+      if (todoExists.isEmpty) return res.status(404).json({'error': 'Todo not found'});
+
+      final todo = await db.update('todos').set(body!).where(eq('todos.id', id)).returning();
+      return res.status(200).json(todo);
     } on ZardError catch (e) {
       return res.status(400).json({'error': e.format()});
     }
   }
 
-  void delete(Request req, Response res) {
+  void delete(Request req, Response res) async {
     final paramsSchema = z.coerce.int();
 
     try {
       final id = paramsSchema.parse(req.params['id']);
 
-      final index = _todos.indexWhere((todo) => todo['id'] == id);
+      final index = await db.select().from('todos').where(eq('todos.id', id));
 
-      if (index == -1) return res.status(404).json({'error': 'Todo not found'});
+      if (index.isEmpty) return res.status(404).json({'error': 'Todo not found'});
 
-      _todos.removeAt(index);
+      await db.delete('todos').where(eq('todos.id', id));
       return res.status(204).end();
     } on ZardError catch (e) {
       return res.status(400).json({'error': e.format()});
